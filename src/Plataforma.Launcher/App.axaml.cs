@@ -19,8 +19,13 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+#if DEBUG
+            const string defaultApiBaseUrl = "http://localhost:5000";
+#else
+            const string defaultApiBaseUrl = "https://plataforma.crefeed.com.br/auth-api/";
+#endif
             var apiBaseUrl = Environment.GetEnvironmentVariable("PLATAFORMA_API_BASE_URL")
-                ?? "http://localhost:5000";
+                ?? defaultApiBaseUrl;
             if (!Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var baseAddress)
                 || baseAddress.Scheme is not ("http" or "https"))
             {
@@ -50,7 +55,9 @@ public partial class App : Application
             var viewModel = new MainViewModel(
                 new PlatformApiClient(httpClient),
                 new GameInstallationService(downloadHttpClient),
-                LauncherProtocol.FindGameLaunchUri(desktop.Args));
+                LauncherProtocol.FindGameLaunchUri(desktop.Args),
+                new LauncherSettingsStore());
+            viewModel.LoadRememberedEmail();
             var mainWindow = new MainWindow
             {
                 DataContext = viewModel

@@ -12,9 +12,12 @@ namespace Plataforma.Launcher.ViewModels;
 public partial class MainViewModel(
     PlatformApiClient apiClient,
     GameInstallationService gameInstallationService,
-    string? launchUri = null) : ViewModelBase
+    string? launchUri = null,
+    LauncherSettingsStore? settingsStore = null) : ViewModelBase
 {
     private const string ServerManagedGameSlug = "dash-and-crash";
+    private readonly LauncherSettingsStore _settingsStore = settingsStore ?? new();
+    private bool _isLoadingSettings;
     private string? pendingGameSlug = LauncherProtocol.TryGetGameSlug(launchUri, out var gameSlug)
         ? gameSlug
         : null;
@@ -23,10 +26,16 @@ public partial class MainViewModel(
     public partial string Email { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial bool RememberEmail { get; set; }
+
+    [ObservableProperty]
     public partial string Password { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string ErrorMessage { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string StatusMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string SignedInEmail { get; set; } = string.Empty;
@@ -38,6 +47,8 @@ public partial class MainViewModel(
     public partial bool IsBusy { get; set; }
 
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
+
+    public bool HasStatusMessage => !string.IsNullOrWhiteSpace(StatusMessage);
 
     public ObservableCollection<LibraryGameViewModel> PurchasedGames { get; } = [];
 
@@ -102,6 +113,7 @@ public partial class MainViewModel(
     private async Task LoginAsync(CancellationToken cancellationToken)
     {
         ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
         IsBusy = true;
 
         try
@@ -109,6 +121,7 @@ public partial class MainViewModel(
             session = await apiClient.LoginAsync(Email.Trim(), Password, cancellationToken);
             SignedInEmail = session.Email;
             Password = string.Empty;
+            SaveRememberedEmail(session.Email);
             IsAuthenticated = true;
             AccountInitial = GetAccountInitial(session.Email);
             await LoadProfileAsync(cancellationToken);
@@ -131,6 +144,46 @@ public partial class MainViewModel(
         catch (HttpRequestException)
         {
             ErrorMessage = "Não foi possível conectar à plataforma. Verifique a API e tente novamente.";
+        }
+        catch (JsonException)
+        {
+            ErrorMessage = "A API retornou uma resposta inválida. Tente novamente mais tarde.";
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            ErrorMessage = "A conexão com a plataforma expirou. Tente novamente.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ForgotPasswordAsync(CancellationToken cancellationToken)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        if (string.IsNullOrWhiteSpace(Email))
+        {
+            ErrorMessage = "Informe seu e-mail para solicitar a recuperação da senha.";
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await apiClient.RequestPasswordResetAsync(Email.Trim(), cancellationToken);
+            StatusMessage =
+                "Se houver uma conta com esse e-mail, enviaremos um link para redefinir a senha.";
+        }
+        catch (PlatformApiException exception)
+        {
+            ErrorMessage = exception.Message;
+        }
+        catch (HttpRequestException)
+        {
+            ErrorMessage = "Não foi possível conectar à plataforma. Tente novamente.";
         }
         catch (JsonException)
         {
@@ -179,6 +232,81 @@ public partial class MainViewModel(
     partial void OnErrorMessageChanged(string value)
     {
         OnPropertyChanged(nameof(HasError));
+    }
+
+    partial void OnStatusMessageChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasStatusMessage));
+    }
+
+    partial void OnRememberEmailChanged(bool value)
+    {
+        if (_isLoadingSettings || value)
+        {
+            return;
+        }
+
+        try
+        {
+            _settingsStore.ClearRememberedEmail();
+        }
+        catch (IOException)
+        {
+            ErrorMessage = "Não foi possível apagar o e-mail salvo neste dispositivo.";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ErrorMessage = "Não foi possível apagar o e-mail salvo neste dispositivo.";
+        }
+    }
+
+    public void LoadRememberedEmail()
+    {
+        _isLoadingSettings = true;
+        try
+        {
+            Email = _settingsStore.LoadRememberedEmail() ?? string.Empty;
+            RememberEmail = !string.IsNullOrWhiteSpace(Email);
+        }
+        catch (IOException)
+        {
+            ErrorMessage = "Não foi possível carregar as preferências do launcher.";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ErrorMessage = "Não foi possível carregar as preferências do launcher.";
+        }
+        catch (JsonException)
+        {
+            ErrorMessage = "As preferências salvas do launcher estão inválidas.";
+        }
+        finally
+        {
+            _isLoadingSettings = false;
+        }
+    }
+
+    private void SaveRememberedEmail(string email)
+    {
+        try
+        {
+            if (RememberEmail)
+            {
+                _settingsStore.SaveRememberedEmail(email);
+            }
+            else
+            {
+                _settingsStore.ClearRememberedEmail();
+            }
+        }
+        catch (IOException)
+        {
+            StatusMessage = "Login realizado, mas não foi possível salvar o e-mail neste dispositivo.";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            StatusMessage = "Login realizado, mas não foi possível salvar o e-mail neste dispositivo.";
+        }
     }
 
     partial void OnCurrentSectionChanged(string value)

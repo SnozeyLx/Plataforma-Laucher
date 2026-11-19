@@ -47,6 +47,21 @@ public sealed class PlatformApiClient(HttpClient httpClient)
         return new LauncherSession(user.Email, tokens.AccessToken, tokens.RefreshToken);
     }
 
+    public async Task RequestPasswordResetAsync(
+        string email,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            "api/auth/forgot-password",
+            new ForgotPasswordRequest(email),
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            await ThrowApiExceptionAsync(response, cancellationToken);
+        }
+    }
+
     public async Task LogoutAsync(LauncherSession session, CancellationToken cancellationToken)
     {
         using var response = await _httpClient.PostAsJsonAsync(
@@ -186,6 +201,8 @@ public sealed class PlatformApiClient(HttpClient httpClient)
     }
 
     private sealed record LoginRequest(string Email, string Password);
+
+    private sealed record ForgotPasswordRequest(string Email);
 
     private sealed record RefreshTokenRequest(string RefreshToken);
 

@@ -82,14 +82,29 @@
                     <TextBox PlaceholderText="E-mail"
                              Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}"
                              IsEnabled="{Binding !IsBusy}" />
+                    <CheckBox Content="Lembrar meu e-mail"
+                              IsChecked="{Binding RememberEmail}"
+                              IsEnabled="{Binding !IsBusy}" />
                     <TextBox PlaceholderText="Senha"
                              PasswordChar="*"
                              Text="{Binding Password, UpdateSourceTrigger=PropertyChanged}"
                              IsEnabled="{Binding !IsBusy}" />
+                    <Button Content="Esqueceu a senha?"
+                            HorizontalAlignment="Left"
+                            IsEnabled="{Binding !IsBusy}"
+                            Command="{Binding ForgotPasswordCommand}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Foreground="#AEB5C4"
+                            Padding="0,4" />
                     <TextBlock Foreground="#FF7A82"
                                TextWrapping="Wrap"
                                IsVisible="{Binding HasError}"
                                Text="{Binding ErrorMessage}" />
+                    <TextBlock Foreground="#AEB5C4"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasStatusMessage}"
+                               Text="{Binding StatusMessage}" />
                     <Button Content="Entrar na plataforma"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"

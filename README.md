@@ -17,7 +17,7 @@ Na raiz do repositório:
 dotnet run --project .\src\Plataforma.Launcher\Plataforma.Launcher.csproj
 ```
 
-O launcher usa `http://localhost:5000` como endereço padrão da Auth API. Para apontar para outro endereço, configure a variável de ambiente `PLATAFORMA_API_BASE_URL` com uma URL HTTP ou HTTPS absoluta, sem query nem fragmento. HTTP é permitido apenas para loopback; APIs remotas devem usar HTTPS.
+No modo Debug, o launcher usa `http://localhost:5000` como endereço padrão da Auth API. Em builds Release, usa `https://plataforma.crefeed.com.br/auth-api/`. Para apontar para outro endereço, configure a variável de ambiente `PLATAFORMA_API_BASE_URL` com a URL base HTTP ou HTTPS absoluta, sem query nem fragmento. HTTP é permitido apenas para loopback; APIs remotas devem usar HTTPS.
 
 ## Instalador Windows
 
@@ -29,9 +29,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-windows-inst
 
 O arquivo `artifacts/windows/installer/Plataforma-Launcher-Setup-win-x64.exe` instala por usuário, cria um atalho no menu Iniciar, oferece um atalho opcional na área de trabalho e registra o protocolo `playlab://`. A instalação e a desinstalação não exigem privilégios de administrador. O ZIP portátil continua disponível como alternativa. A build atual ainda não tem assinatura de código; o Windows pode exibir um aviso do SmartScreen até que seja usado um certificado de assinatura confiável.
 
-Os tokens de acesso e de refresh são mantidos somente em memória nesta etapa. Fechar o aplicativo encerra a sessão local; armazenamento persistente de credenciais será definido em uma etapa posterior.
+Os tokens de acesso e de refresh são mantidos somente em memória. O launcher pode guardar o e-mail após um login bem-sucedido quando “Lembrar meu e-mail” estiver marcado; a senha nunca é salva. Fechar o aplicativo encerra a sessão local.
 
-O fluxo de login integra `POST /api/auth/login`, consulta `GET /api/auth/me` e encerra a sessão com `POST /api/auth/logout`. Após entrar, o launcher carrega a biblioteca persistente por `GET /api/library`. Para Dash & Crash, o modo sandbox do backend pode conceder o entitlement a todas as contas de teste; o launcher nunca simula essa licença localmente.
+O fluxo de login integra `POST /api/auth/login`, consulta `GET /api/auth/me` e encerra a sessão com `POST /api/auth/logout`. “Esqueceu a senha?” solicita um link por `POST /api/auth/forgot-password`; o link abre a página segura de redefinição no portal. Após entrar, o launcher carrega a biblioteca persistente por `GET /api/library`. Para Dash & Crash, o modo sandbox do backend pode conceder o entitlement a todas as contas de teste; o launcher nunca simula essa licença localmente.
 
 O launcher solicita acesso ao Windows em `GET /api/games/{slug}/access?platform=windows`, baixa o ZIP com link temporário da Bunny CDN, extrai-o para `%LOCALAPPDATA%\Playlab\Games` e permite iniciar o jogo instalado. A extração usa as proteções do .NET contra caminhos de arquivo fora da pasta de destino. Se o ZIP tiver vários executáveis, escolha o executável principal na biblioteca. O botão WebGL continua abrindo o link temporário no navegador padrão. As ações permanecem indisponíveis enquanto a API não confirmar a licença e a configuração do build.
 
