@@ -1,0 +1,187 @@
+name: Release launcher
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: ${{ matrix.channel }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.runner }}
+    concurrency:
+      group: launcher-release-${{ matrix.channel }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            runtime: win-x64
+            channel: win-x64
+            executable: Plataforma.Launcher.exe
+            installer_pattern: "*-Setup.exe"
+            installer_name: Plataforma_laucher.exe
+          - runner: macos-15-intel
+            runtime: osx-x64
+            channel: osx-x64
+            executable: Plataforma.Launcher
+            installer_pattern: "*-Setup.pkg"
+            installer_name: Plataforma_laucher_macos_x64.pkg
+          - runner: macos-15
+            runtime: osx-arm64
+            channel: osx-arm64
+            executable: Plataforma.Launcher
+            installer_pattern: "*-Setup.pkg"
+            installer_name: Plataforma_laucher_macos_arm64.pkg
+          - runner: ubuntu-latest
+            runtime: linux-x64
+            channel: linux-x64
+            executable: Plataforma.Launcher
+            installer_pattern: "*.AppImage"
+            installer_name: Plataforma_laucher_linux_x64.AppImage
+    env:
+      CHANNEL: ${{ matrix.channel }}
+      RUNTIME: ${{ matrix.runtime }}
+      APP_EXECUTABLE: ${{ matrix.executable }}
+      INSTALLER_PATTERN: ${{ matrix.installer_pattern }}
+      INSTALLER_NAME: ${{ matrix.installer_name }}
+      RELEASE_VERSION: 1.${{ github.run_number }}.${{ github.run_attempt }}
+      LAUNCHER_OBJECT_DIRECTORY: Plataform-Build
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Velopack CLI
+        shell: bash
+        run: |
+          dotnet tool install --tool-path "$RUNNER_TEMP/vpk-tools" vpk --version 1.2.161
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "$(cygpath -w "$RUNNER_TEMP/vpk-tools")" >> "$GITHUB_PATH"
+          else
+            echo "$RUNNER_TEMP/vpk-tools" >> "$GITHUB_PATH"
+          fi
+
+      - name: Publish launcher
+        shell: bash
+        run: |
+          dotnet publish src/Plataforma.Launcher/Plataforma.Launcher.csproj \
+            --configuration Release \
+            --runtime "$RUNTIME" \
+            --self-contained true \
+            --property:Version="$RELEASE_VERSION" \
+            --output "$RUNNER_TEMP/launcher-publish"
+
+      - name: Download previous release for delta generation
+        shell: bash
+        run: |
+          vpk download http \
+            --url "https://plataforma.crefeed.com.br/auth-api/api/launcher/updates/$CHANNEL" \
+            --channel "$CHANNEL" \
+            --outputDir "$RUNNER_TEMP/launcher-releases" \
+            --allowEmptyChannel
+
+      - name: Package launcher release
+        shell: bash
+        run: |
+          vpk pack \
+            --packId Playlab.Launcher \
+            --packTitle "Playlab Launcher" \
+            --packVersion "$RELEASE_VERSION" \
+            --packDir "$RUNNER_TEMP/launcher-publish" \
+            --mainExe "$APP_EXECUTABLE" \
+            --runtime "$RUNTIME" \
+            --channel "$CHANNEL" \
+            --outputDir "$RUNNER_TEMP/launcher-releases"
+
+      - name: Upload packages and installer to Bunny
+        shell: bash
+        env:
+          BUNNY_STORAGE_ZONE_NAME: ${{ vars.BUNNY_STORAGE_ZONE_NAME }}
+          BUNNY_STORAGE_API_ENDPOINT: ${{ vars.BUNNY_STORAGE_API_ENDPOINT }}
+          BUNNY_STORAGE_ACCESS_KEY: ${{ secrets.BUNNY_STORAGE_ACCESS_KEY }}
+          BUNNY_CDN_BASE_URL: ${{ vars.BUNNY_CDN_BASE_URL }}
+          BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
+        run: |
+          set -euo pipefail
+          : "${BUNNY_STORAGE_ZONE_NAME:?Set the BUNNY_STORAGE_ZONE_NAME repository variable}"
+          : "${BUNNY_STORAGE_API_ENDPOINT:?Set the BUNNY_STORAGE_API_ENDPOINT repository variable}"
+          : "${BUNNY_STORAGE_ACCESS_KEY:?Set the BUNNY_STORAGE_ACCESS_KEY repository secret}"
+          : "${BUNNY_CDN_BASE_URL:?Set the BUNNY_CDN_BASE_URL repository variable}"
+          : "${BUNNY_API_KEY:?Set the BUNNY_API_KEY repository secret}"
+
+          release_dir="$RUNNER_TEMP/launcher-releases"
+          update_directory="$LAUNCHER_OBJECT_DIRECTORY/updates/$CHANNEL"
+          storage_endpoint="${BUNNY_STORAGE_API_ENDPOINT%/}"
+          cdn_base_url="${BUNNY_CDN_BASE_URL%/}"
+
+          installer_source="$(find "$release_dir" -maxdepth 1 -type f -name "$INSTALLER_PATTERN" -print -quit)"
+          if [[ -z "$installer_source" ]]; then
+            echo "Velopack did not produce the expected installer: $INSTALLER_PATTERN" >&2
+            exit 1
+          fi
+          installer_path="$release_dir/$INSTALLER_NAME"
+          cp "$installer_source" "$installer_path"
+
+          upload_file() {
+            local source_file="$1"
+            local remote_path="$2"
+            curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+              --request PUT \
+              --header "AccessKey: $BUNNY_STORAGE_ACCESS_KEY" \
+              --header "Content-Type: application/octet-stream" \
+              --upload-file "$source_file" \
+              "$storage_endpoint/$BUNNY_STORAGE_ZONE_NAME/$remote_path"
+          }
+
+          shopt -s nullglob
+          packages=("$release_dir"/*.nupkg)
+          if (( ${#packages[@]} == 0 )); then
+            echo "Velopack did not produce any update packages." >&2
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            upload_file "$package" "$update_directory/$(basename "$package")"
+          done
+
+          for metadata in \
+            "$release_dir/assets.$CHANNEL.json" \
+            "$release_dir/RELEASES" \
+            "$release_dir/RELEASES-$CHANNEL"; do
+            if [[ -f "$metadata" ]]; then
+              upload_file "$metadata" "$update_directory/$(basename "$metadata")"
+            fi
+          done
+
+          feed="$release_dir/releases.$CHANNEL.json"
+          if [[ ! -f "$feed" ]]; then
+            echo "Velopack did not produce releases.$CHANNEL.json." >&2
+            exit 1
+          fi
+          upload_file "$installer_path" "$LAUNCHER_OBJECT_DIRECTORY/$INSTALLER_NAME"
+          upload_file "$feed" "$update_directory/$(basename "$feed")"
+
+          purge_url() {
+            local url="$1"
+            curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+              --request POST \
+              --header "AccessKey: $BUNNY_API_KEY" \
+              --get \
+              --data-urlencode "url=$url" \
+              --data-urlencode "async=true" \
+              "https://api.bunny.net/purge"
+          }
+
+          purge_url "$cdn_base_url/$LAUNCHER_OBJECT_DIRECTORY/$INSTALLER_NAME"
+          purge_url "$cdn_base_url/$update_directory/$(basename "$feed")"

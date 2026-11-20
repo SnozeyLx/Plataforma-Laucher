@@ -41,13 +41,11 @@ public partial class App : Application
                     "PLATAFORMA_API_BASE_URL must not contain a query or fragment, and remote APIs must use HTTPS.");
             }
 
-            var httpClient = new HttpClient
-            {
-                BaseAddress = new Uri(
-                    baseAddress.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
-                        ? baseAddress.AbsoluteUri
-                        : baseAddress.AbsoluteUri + "/")
-            };
+            var apiBaseAddress = new Uri(
+                baseAddress.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
+                    ? baseAddress.AbsoluteUri
+                    : baseAddress.AbsoluteUri + "/");
+            var httpClient = new HttpClient { BaseAddress = apiBaseAddress };
             var downloadHttpClient = new HttpClient
             {
                 Timeout = TimeSpan.FromHours(2)
@@ -56,12 +54,15 @@ public partial class App : Application
                 new PlatformApiClient(httpClient),
                 new GameInstallationService(downloadHttpClient),
                 LauncherProtocol.FindGameLaunchUri(desktop.Args),
-                new LauncherSettingsStore());
+                new LauncherSettingsStore(),
+                new LauncherUpdateService(apiBaseAddress));
             viewModel.LoadRememberedEmail();
             var mainWindow = new MainWindow
             {
                 DataContext = viewModel
             };
+            mainWindow.Opened += (_, _) =>
+                _ = viewModel.CheckForLauncherUpdatesAsync(CancellationToken.None);
             desktop.MainWindow = mainWindow;
 
             var registrationWarning = LauncherProtocol.RegisterForCurrentUser();

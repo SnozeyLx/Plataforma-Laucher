@@ -105,6 +105,15 @@
                                TextWrapping="Wrap"
                                IsVisible="{Binding HasStatusMessage}"
                                Text="{Binding StatusMessage}" />
+                    <TextBlock Foreground="#AEB5C4"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasLauncherUpdateStatusMessage}"
+                               Text="{Binding LauncherUpdateStatusMessage}" />
+                    <ProgressBar Maximum="100"
+                                 Value="{Binding LauncherUpdateProgress}"
+                                 IsVisible="{Binding IsCheckingForLauncherUpdates}"
+                                 Height="3"
+                                 Foreground="#7C8CFF" />
                     <Button Content="Entrar na plataforma"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
@@ -237,6 +246,15 @@
                                    FontWeight="Bold"
                                    Text="Loja"
                                    IsVisible="{Binding IsStoreSection}" />
+                        <TextBlock FontSize="10"
+                                   Foreground="#AEB5C4"
+                                   IsVisible="{Binding HasLauncherUpdateStatusMessage}"
+                                   Text="{Binding LauncherUpdateStatusMessage}" />
+                        <ProgressBar Maximum="100"
+                                     Value="{Binding LauncherUpdateProgress}"
+                                     IsVisible="{Binding IsCheckingForLauncherUpdates}"
+                                     Height="3"
+                                     Foreground="#7C8CFF" />
                     </StackPanel>
                 </Grid>
 

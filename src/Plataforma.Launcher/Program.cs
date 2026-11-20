@@ -2,6 +2,7 @@
 using Plataforma.Launcher.Services;
 using System.Diagnostics;
 using System.Threading;
+using Velopack;
 
 namespace Plataforma.Launcher;
 
@@ -13,6 +14,8 @@ sealed class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        VelopackApp.Build().Run();
+
         using var mutex = new Mutex(
             initiallyOwned: false,
             LauncherInstanceCoordinator.MutexName,

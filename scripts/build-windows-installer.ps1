@@ -1,46 +1,50 @@
+param(
+    [string]$Version = "1.1.1"
+)
+
 $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot "src\Plataforma.Launcher\Plataforma.Launcher.csproj"
-$installerPath = Join-Path $repositoryRoot "installer\Plataforma.Launcher.iss"
-$assetDirectory = Join-Path $repositoryRoot "src\Plataforma.Launcher\Assets"
 $publishDirectory = Join-Path $repositoryRoot "artifacts\windows\publish"
-$outputDirectory = Join-Path $repositoryRoot "artifacts\windows\installer"
+$releaseDirectory = Join-Path $repositoryRoot "artifacts\windows\release"
+$installerName = "Plataforma_laucher.exe"
+$outputInstaller = Join-Path $releaseDirectory $installerName
 
-$compiler = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
-if (-not $compiler) {
-    $compilerCandidates = @(
-        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
-        (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
-    )
-    $compiler = $compilerCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+$vpk = (Get-Command vpk -ErrorAction SilentlyContinue).Source
+if (-not $vpk) {
+    throw "Velopack CLI 1.2.161 is required. Install it with: dotnet tool install --global vpk --version 1.2.161"
 }
 
-if (-not $compiler) {
-    throw "Inno Setup 6 is required. Install it from https://jrsoftware.org/isinfo.php and run this script again."
-}
-
-New-Item -ItemType Directory -Force -Path $publishDirectory, $outputDirectory | Out-Null
+New-Item -ItemType Directory -Force -Path $publishDirectory, $releaseDirectory | Out-Null
 
 & dotnet publish $projectPath `
     --configuration Release `
     --runtime win-x64 `
     --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
+    "-p:Version=$Version" `
     --output $publishDirectory
 if ($LASTEXITCODE -ne 0) {
     throw "The Windows launcher publish failed with exit code $LASTEXITCODE."
 }
 
-$publishMacro = "/DPublishDir=`"$publishDirectory`""
-$outputMacro = "/DOutputDir=`"$outputDirectory`""
-$assetMacro = "/DAssetDir=`"$assetDirectory`""
-& $compiler $publishMacro $outputMacro $assetMacro $installerPath
+& $vpk pack `
+    --packId Playlab.Launcher `
+    --packTitle "Playlab Launcher" `
+    --packVersion $Version `
+    --packDir $publishDirectory `
+    --mainExe Plataforma.Launcher.exe `
+    --runtime win-x64 `
+    --channel win-x64 `
+    --outputDir $releaseDirectory
 if ($LASTEXITCODE -ne 0) {
-    throw "Inno Setup failed with exit code $LASTEXITCODE."
+    throw "Velopack failed to package the Windows launcher with exit code $LASTEXITCODE."
 }
 
-$installer = Join-Path $outputDirectory "Plataforma-Launcher-Setup-win-x64.exe"
-Get-Item $installer | Select-Object FullName, Length, LastWriteTime
+$generatedInstaller = Join-Path $releaseDirectory "Playlab.Launcher-win-x64-Setup.exe"
+if (-not (Test-Path $generatedInstaller)) {
+    throw "Velopack did not produce the expected installer at '$generatedInstaller'."
+}
+
+Copy-Item -Path $generatedInstaller -Destination $outputInstaller -Force
+Get-Item $outputInstaller | Select-Object FullName, Length, LastWriteTime

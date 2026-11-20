@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Collections.ObjectModel;
 using System.Net;
+using Velopack.Exceptions;
 
 namespace Plataforma.Launcher.ViewModels;
 
@@ -13,10 +14,13 @@ public partial class MainViewModel(
     PlatformApiClient apiClient,
     GameInstallationService gameInstallationService,
     string? launchUri = null,
-    LauncherSettingsStore? settingsStore = null) : ViewModelBase
+    LauncherSettingsStore? settingsStore = null,
+    LauncherUpdateService? launcherUpdateService = null) : ViewModelBase
 {
     private const string ServerManagedGameSlug = "dash-and-crash";
     private readonly LauncherSettingsStore _settingsStore = settingsStore ?? new();
+    private readonly LauncherUpdateService? _launcherUpdateService = launcherUpdateService;
+    private readonly string[] restartArguments = launchUri is null ? [] : [launchUri];
     private bool _isLoadingSettings;
     private string? pendingGameSlug = LauncherProtocol.TryGetGameSlug(launchUri, out var gameSlug)
         ? gameSlug
@@ -46,9 +50,21 @@ public partial class MainViewModel(
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsCheckingForLauncherUpdates { get; set; }
+
+    [ObservableProperty]
+    public partial int LauncherUpdateProgress { get; set; }
+
+    [ObservableProperty]
+    public partial string LauncherUpdateStatusMessage { get; set; } = string.Empty;
+
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
     public bool HasStatusMessage => !string.IsNullOrWhiteSpace(StatusMessage);
+
+    public bool HasLauncherUpdateStatusMessage =>
+        !string.IsNullOrWhiteSpace(LauncherUpdateStatusMessage);
 
     public ObservableCollection<LibraryGameViewModel> PurchasedGames { get; } = [];
 
@@ -159,6 +175,81 @@ public partial class MainViewModel(
         }
     }
 
+    /// <summary>
+    /// Checks for a launcher update, downloads it in the background, and restarts to apply it.
+    /// </summary>
+    public async Task CheckForLauncherUpdatesAsync(CancellationToken cancellationToken)
+    {
+        if (_launcherUpdateService is null || !_launcherUpdateService.IsInstalled)
+        {
+            return;
+        }
+
+        IsCheckingForLauncherUpdates = true;
+        LauncherUpdateProgress = 0;
+        LauncherUpdateStatusMessage = "Verificando atualizações do launcher…";
+
+        try
+        {
+            var update = await _launcherUpdateService.CheckForUpdatesAsync();
+            if (update is null)
+            {
+                LauncherUpdateStatusMessage = "O launcher já está atualizado.";
+                return;
+            }
+
+            LauncherUpdateStatusMessage =
+                $"Baixando a versão {update.TargetFullRelease.Version} do launcher…";
+            var progress = new Progress<int>(value => LauncherUpdateProgress = value);
+            await _launcherUpdateService.DownloadUpdatesAsync(
+                update,
+                progress,
+                cancellationToken);
+
+            LauncherUpdateStatusMessage = "Atualização pronta. Reiniciando o launcher…";
+            _launcherUpdateService.ApplyUpdatesAndRestart(update, restartArguments);
+        }
+        catch (NotInstalledException exception)
+        {
+            Trace.TraceError("The launcher update check requires a Velopack install: {0}", exception);
+            LauncherUpdateStatusMessage = "Não foi possível aplicar a atualização nesta instalação.";
+        }
+        catch (AcquireLockFailedException exception)
+        {
+            Trace.TraceError("Another launcher update operation is already in progress: {0}", exception);
+            LauncherUpdateStatusMessage = "Outra atualização do launcher já está em andamento.";
+        }
+        catch (ChecksumFailedException exception)
+        {
+            Trace.TraceError("The downloaded launcher update failed checksum validation: {0}", exception);
+            LauncherUpdateStatusMessage = "O arquivo de atualização não passou na validação. Tente novamente.";
+        }
+        catch (HttpRequestException exception)
+        {
+            Trace.TraceError("Could not reach the launcher update service: {0}", exception);
+            LauncherUpdateStatusMessage = "Não foi possível verificar atualizações do launcher.";
+        }
+        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            Trace.TraceError("The launcher update request timed out: {0}", exception);
+            LauncherUpdateStatusMessage = "A verificação de atualização expirou. Tente novamente.";
+        }
+        catch (IOException exception)
+        {
+            Trace.TraceError("Could not download or prepare the launcher update: {0}", exception);
+            LauncherUpdateStatusMessage = "Não foi possível preparar a atualização do launcher.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            Trace.TraceError("The launcher update could not be applied: {0}", exception);
+            LauncherUpdateStatusMessage = "Não foi possível aplicar a atualização do launcher.";
+        }
+        finally
+        {
+            IsCheckingForLauncherUpdates = false;
+        }
+    }
+
     [RelayCommand]
     private async Task ForgotPasswordAsync(CancellationToken cancellationToken)
     {
@@ -237,6 +328,11 @@ public partial class MainViewModel(
     partial void OnStatusMessageChanged(string value)
     {
         OnPropertyChanged(nameof(HasStatusMessage));
+    }
+
+    partial void OnLauncherUpdateStatusMessageChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasLauncherUpdateStatusMessage));
     }
 
     partial void OnRememberEmailChanged(bool value)
